@@ -152,7 +152,7 @@ jobs:
       - name: Login to Azure Container Registry
         run: |
           az acr login --name ${{ vars.ACR_NAME }}
-      
+      # Build Docker image
       - name: Build Docker image
         run: |
           docker build \
