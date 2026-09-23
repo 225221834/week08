@@ -60,7 +60,7 @@ jobs:
           --health-interval=5s
           --health-timeout=5s
           --health-retries=10
-
+    # Set environment variables for the test containers
     env:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
