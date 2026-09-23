@@ -1,43 +1,76 @@
 name: 04 - Deploy to Production
 
 on:
+  # Automatic CD: run after staging tests succeed
+  workflow_run:
+    workflows:
+      - "03 - Test Staging"
+    types:
+      - completed
+    branches:
+      - main
+
+  # Keep manual trigger as a fallback (optional but useful)
   workflow_dispatch:
     inputs:
       image_tag:
-        description: "Tested image SHA to deploy"
-        required: true
+        description: "Image SHA to deploy (leave empty to use latest from main)"
+        required: false
         type: string
 
-jobs: 
+jobs:
   deploy-production:
     name: Deploy to Production
     runs-on: ubuntu-latest
 
+    # Only continue if the previous workflow succeeded (or it was a manual run)
+    if: >
+      ${{ github.event_name == 'workflow_dispatch' ||
+          github.event.workflow_run.conclusion == 'success' }}
+
     environment:
       name: production
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
+        with:
+          # Never check out workflow_run code, which may originate from an untrusted PR.
+          # Deploy only manifests from the trusted target repository's default branch.
+          ref: ${{ github.event.repository.default_branch }}
+        # Use the same commit that passed staging tests
+      - name: Determine image tag
+        id: tag
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_IMAGE_TAG: ${{ inputs.image_tag }}
+          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$INPUT_IMAGE_TAG" ]; then
+            echo "image_tag=$INPUT_IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          else
+            # Automatic path: use the SHA that was tested in staging
+            echo "image_tag=$WORKFLOW_RUN_SHA" >> "$GITHUB_OUTPUT"
+          fi
+      # Log in to Azure
       - name: Login to Azure
         uses: azure/login@v3
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
-
+      # Log in to Azure Container Registry
       - name: Get AKS credentials
         run: |
           az aks get-credentials \
             --resource-group ${{ vars.AKS_RESOURCE_GROUP }} \
             --name ${{ vars.AKS_CLUSTER_NAME }} \
             --overwrite-existing
-
+      # Create production namespace and secrets
       - name: Create production namespace
         run: |
           kubectl create namespace production \
             --dry-run=client \
             -o yaml | kubectl apply -f -
-
+      # Create PostgreSQL secret and application secret
       - name: Create PostgreSQL secret
         run: |
           kubectl create secret generic postgres-secret \
@@ -46,7 +79,7 @@ jobs:
             --from-literal=POSTGRES_PASSWORD="${{ secrets.POSTGRES_PASSWORD }}" \
             --dry-run=client \
             -o yaml | kubectl apply -f -
-
+      # Create application secret with all necessary environment variables
       - name: Create application secret
         run: |
           kubectl create secret generic application-secret \
@@ -60,72 +93,72 @@ jobs:
             --from-literal=AZURE_STORAGE_CONNECTION_STRING="${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}" \
             --dry-run=client \
             -o yaml | kubectl apply -f -
-
+      # Apply Kubernetes manifests and update images
       - name: Apply Kubernetes manifests
         run: |
           kubectl apply \
             -f kubernetes/production/
-
+      # Update images for each service with the new image tag
       - name: Update frontend image
         run: |
           kubectl set image deployment/frontend \
-            frontend=${{ vars.ACR_LOGIN_SERVER }}/koalatech-frontend:${{ inputs.image_tag }} \
+            frontend=${{ vars.ACR_LOGIN_SERVER }}/koalatech-frontend:${{ steps.tag.outputs.image_tag }} \
             -n production
-
+      # Update images for each service with the new image tag
       - name: Update user-service image
         run: |
           kubectl set image deployment/user-service \
-            user-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-user-service:${{ inputs.image_tag }} \
+            user-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-user-service:${{ steps.tag.outputs.image_tag }} \
             -n production
-
+      # Update images for each service with the new image tag
       - name: Update student-service image
         run: |
           kubectl set image deployment/student-service \
-            student-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-student-service:${{ inputs.image_tag }} \
+            student-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-student-service:${{ steps.tag.outputs.image_tag }} \
             -n production
-
+      # Update images for each service with the new image tag
       - name: Update lecturer-service image
         run: |
           kubectl set image deployment/lecturer-service \
-            lecturer-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-lecturer-service:${{ inputs.image_tag }} \
+            lecturer-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-lecturer-service:${{ steps.tag.outputs.image_tag }} \
             -n production
-
+      # Update images for each service with the new image tag
       - name: Update course-service image
         run: |
           kubectl set image deployment/course-service \
-            course-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-course-service:${{ inputs.image_tag }} \
+            course-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-course-service:${{ steps.tag.outputs.image_tag }} \
             -n production
-
+      # Update images for each service with the new image tag
       - name: Update enrollment-service image
         run: |
           kubectl set image deployment/enrollment-service \
-            enrollment-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-enrollment-service:${{ inputs.image_tag }} \
+            enrollment-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-enrollment-service:${{ steps.tag.outputs.image_tag }} \
             -n production
-
+      # Wait for rollouts to complete for each deployment
       - name: Wait for frontend rollout
         run: |
           kubectl rollout status deployment/frontend \
             -n production \
             --timeout=300s
-
+      # Wait for rollouts to complete for each deployment
       - name: Wait for user-service rollout
         run: |
           kubectl rollout status deployment/user-service \
             -n production \
             --timeout=300s
-
+      # Wait for rollouts to complete for each deployment
       - name: Wait for student-service rollout
         run: |
           kubectl rollout status deployment/student-service \
             -n production \
             --timeout=300s
-
+      
       - name: Wait for lecturer-service rollout
         run: |
           kubectl rollout status deployment/lecturer-service \
             -n production \
             --timeout=300s
-
+      
       - name: Wait for course-service rollout
         run: |
           kubectl rollout status deployment/course-service \
@@ -137,7 +170,7 @@ jobs:
           kubectl rollout status deployment/enrollment-service \
             -n production \
             --timeout=300s
-
+      # Show production resources
       - name: Show production resources
         run: |
           kubectl get pods -n production
