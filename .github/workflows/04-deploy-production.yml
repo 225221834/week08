@@ -1,7 +1,7 @@
 name: 04 - Deploy to Production
-
 on:
   # Automatic CD: run after staging tests succeed
+  # This workflow will only run if the previous workflow (03 - Test Staging) completed successfully.
   workflow_run:
     workflows:
       - "03 - Test Staging"
@@ -30,7 +30,7 @@ jobs:
 
     environment:
       name: production
-
+   
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -38,14 +38,15 @@ jobs:
           # Never check out workflow_run code, which may originate from an untrusted PR.
           # Deploy only manifests from the trusted target repository's default branch.
           ref: ${{ github.event.repository.default_branch }}
+        
         # Use the same commit that passed staging tests
       - name: Determine image tag
         id: tag
-        env:
+        env: # Set environment variables for the image tag determination
           EVENT_NAME: ${{ github.event_name }}
           INPUT_IMAGE_TAG: ${{ inputs.image_tag }}
           WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
-        run: |
+        run: | # Determine the image tag to deploy based on the event type
           if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$INPUT_IMAGE_TAG" ]; then
             echo "image_tag=$INPUT_IMAGE_TAG" >> "$GITHUB_OUTPUT"
           else
