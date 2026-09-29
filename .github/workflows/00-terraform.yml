@@ -1,0 +1,44 @@
+name: 00 - Terraform
+on:
+  push:
+    branches: [main]
+    paths: ['terraform/**']
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Terraform action'
+        required: true
+        default: 'plan'
+        type: choice
+        options: [plan, apply]
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.x   # or latest stable
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        run: terraform plan -out=tfplan
+        
+      - name: Terraform Apply
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply'
+        run: terraform apply -auto-approve tfplan

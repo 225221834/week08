@@ -149,3 +149,31 @@ jobs:
           kubectl get pods -n staging
           kubectl get services -n staging
           kubectl get pvc -n staging
+  # =========================================================
+  # Monitoring: Prometheus + Grafana
+  # =========================================================       
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'v3.14.0'   # or latest stable
+
+      - name: Install / Upgrade Prometheus + Grafana
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo update
+          helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+            --namespace monitoring \
+            --create-namespace \
+            --set grafana.adminPassword=${{ secrets.GRAFANA_ADMIN_PASSWORD }} \
+            --wait \
+            --timeout 10m
+
+      - name: Verify monitoring stack
+        run: |
+          kubectl get pods -n monitoring
+          kubectl get svc -n monitoring 
+      - name: Grafana port-forward
+        run: |
+          kubectl port-forward svc/kube-prometheus-stack-grafana 3000:80 -n monitoring &
+          sleep 5
+          echo "Grafana is accessible at http://localhost:3000 (username: admin, password: ${{ secrets.GRAFANA_ADMIN_PASSWORD }})"

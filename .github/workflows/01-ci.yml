@@ -157,6 +157,15 @@ jobs:
             --platform linux/amd64 \
             -t ${{ vars.ACR_LOGIN_SERVER }}/${{ matrix.image }}:${{ github.sha }} \
             ./${{ matrix.service }}
+            
+      # Docker Scout for security vulnerabilities
+      - name: Docker Scout Scan
+        uses: docker/scout-action@v1
+        with:
+          command: cves,recommendations
+          image: ${{ vars.ACR_LOGIN_SERVER }}/${{ matrix.image }}:${{ github.sha }}
+          only-severity: high,critical
+
       # Push Docker image to Azure Container Registry
       - name: Push Docker image with commit SHA
         run: |
