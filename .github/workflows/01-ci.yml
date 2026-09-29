@@ -164,8 +164,12 @@ jobs:
         with:
           command: cves,recommendations
           image: ${{ vars.ACR_LOGIN_SERVER }}/${{ matrix.image }}:${{ github.sha }}
-          only-severity: high,critical
-
+          only-severities: critical,high
+          summary: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          dockerhub-user: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
+          
       # Push Docker image to Azure Container Registry
       - name: Push Docker image with commit SHA
         run: |
