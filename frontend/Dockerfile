@@ -22,12 +22,13 @@ ENV VITE_ENROLLMENT_SERVICE_URL=${VITE_ENROLLMENT_SERVICE_URL}
 
 RUN npm run build
 
-FROM nginx:1.27-alpine
+FROM nginx:1-alpine-slim
+
+# Optional but still good – apply any remaining Alpine patches
+RUN apk update && apk upgrade --no-cache
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-
 COPY --from=build /app/dist /usr/share/nginx/html
 
 EXPOSE 80
-
 CMD ["nginx", "-g", "daemon off;"]
