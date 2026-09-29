@@ -96,6 +96,14 @@ const Login = () => {
             KoalaTech University
           </Typography>
 
+          <Typography
+            color="text.secondary"
+              sx={{ mb: 3 }}
+                >
+                Sign in to continue
+                </Typography>
+
+
           {error && (
             <Alert
               severity="error"
