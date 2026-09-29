@@ -20,7 +20,7 @@ jobs:
 
     strategy:
       fail-fast: false
-
+    # Run tests for each backend service in parallel
       matrix:
         include:
           - service: user-service
