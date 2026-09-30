@@ -94,8 +94,8 @@ jobs:
       - name: Update frontend image
         run: |
           kubectl set image deployment/frontend \
-            frontend=\({{ vars.ACR_LOGIN_SERVER }}/koalatech-frontend:\){{ env.IMAGE_TAG }} \
-            -n staging
+            frontend=${{ vars.ACR_LOGIN_SERVER }}/koalatech-frontend:${{ env.IMAGE_TAG }} \
+              -n staging
 
       - name: Update user-service image
         run: |
