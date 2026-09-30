@@ -16,6 +16,11 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Set Image Tag
+        env:
+          IMAGE_TAG_INPUT: ${{ github.event.inputs.image_tag }}
+        run: echo "IMAGE_TAG=$IMAGE_TAG_INPUT" >> "$GITHUB_ENV"
+
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -27,7 +32,73 @@ jobs:
           resource-group: ${{ vars.AKS_SECONDARY_RESOURCE_GROUP }}
           cluster-name: ${{ vars.AKS_SECONDARY_CLUSTER_NAME }}
 
-      - name: Deploy to Secondary
+      - name: Create secondary namespace
         run: |
-          kubectl create namespace secondary --dry-run=client -o yaml | kubectl apply -f -
-          kubectl apply -f k8s/ -n secondary
+          kubectl create namespace secondary \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Create PostgreSQL secret
+        run: |
+          kubectl create secret generic postgres-secret \
+            --namespace secondary \
+            --from-literal=POSTGRES_USER='${{ secrets.POSTGRES_USER }}' \
+            --from-literal=POSTGRES_PASSWORD='${{ secrets.POSTGRES_PASSWORD }}' \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Create application secret
+        run: |
+          kubectl create secret generic application-secret \
+            --namespace secondary \
+            --from-literal=POSTGRES_USER='${{ secrets.POSTGRES_USER }}' \
+            --from-literal=POSTGRES_PASSWORD='${{ secrets.POSTGRES_PASSWORD }}' \
+            --from-literal=JWT_SECRET_KEY='${{ secrets.JWT_SECRET_KEY }}' \
+            --from-literal=DEFAULT_ADMIN_USERNAME='${{ secrets.DEFAULT_ADMIN_USERNAME }}' \
+            --from-literal=DEFAULT_ADMIN_EMAIL='${{ secrets.DEFAULT_ADMIN_EMAIL }}' \
+            --from-literal=DEFAULT_ADMIN_PASSWORD='${{ secrets.DEFAULT_ADMIN_PASSWORD }}' \
+            --from-literal=AZURE_STORAGE_CONNECTION_STRING='${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}' \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply Kubernetes manifests
+        run: |
+          kubectl apply -f kubernetes/ -n secondary
+          # Or, if you have a dedicated folder:
+          # kubectl apply -f kubernetes/secondary/ -n secondary
+
+      - name: Update images
+        run: |
+          kubectl set image deployment/frontend \
+            frontend=${{ vars.ACR_LOGIN_SERVER }}/koalatech-frontend:${{ env.IMAGE_TAG }} \
+            -n secondary
+
+          kubectl set image deployment/user-service \
+            user-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-user-service:${{ env.IMAGE_TAG }} \
+            -n secondary
+
+          kubectl set image deployment/student-service \
+            student-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-student-service:${{ env.IMAGE_TAG }} \
+            -n secondary
+
+          kubectl set image deployment/lecturer-service \
+            lecturer-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-lecturer-service:${{ env.IMAGE_TAG }} \
+            -n secondary
+
+          kubectl set image deployment/course-service \
+            course-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-course-service:${{ env.IMAGE_TAG }} \
+            -n secondary
+
+          kubectl set image deployment/enrollment-service \
+            enrollment-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-enrollment-service:${{ env.IMAGE_TAG }} \
+            -n secondary
+
+      - name: Wait for rollouts
+        run: |
+          kubectl rollout status deployment/frontend -n secondary --timeout=300s
+          kubectl rollout status deployment/user-service -n secondary --timeout=300s
+          kubectl rollout status deployment/student-service -n secondary --timeout=300s
+          kubectl rollout status deployment/lecturer-service -n secondary --timeout=300s
+          kubectl rollout status deployment/course-service -n secondary --timeout=300s
+          kubectl rollout status deployment/enrollment-service -n secondary --timeout=300s
+
+      - name: Show resources
+        run: |
+          kubectl get pods,svc,ingress -n secondary
