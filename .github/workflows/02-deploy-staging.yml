@@ -1,5 +1,4 @@
 name: 02 - Deploy to Staging (Multi-Region)
-
 on:
   workflow_run:
     workflows:
@@ -11,7 +10,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  deploy-staging:
+  deploy-staging: # Deploy to Staging (Multi-Region)
     name: Deploy to Staging (${{ matrix.region }})
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
