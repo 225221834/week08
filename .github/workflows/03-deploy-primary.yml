@@ -1,0 +1,35 @@
+name: 03 - Deploy to Primary Region
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["01 - CI"]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  deploy-primary:
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    environment: primary-region
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Get Primary AKS Context
+        uses: azure/aks-set-context@v3
+        with:
+          resource-group: ${{ vars.AKS_PRIMARY_RESOURCE_GROUP }}
+          cluster-name: ${{ vars.AKS_PRIMARY_CLUSTER_NAME }}
+
+      - name: Substitute Env & Deploy Manifests
+        run: |
+          kubectl create namespace primary --dry-run=client -o yaml | kubectl apply -f -
+          # Apply your Kubernetes deployment & service manifests into 'primary' namespace
+          kubectl apply -f k8s/ -n primary

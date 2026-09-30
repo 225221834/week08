@@ -1,0 +1,33 @@
+name: 04 - Deploy to Secondary Region
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Git SHA/Tag tested in Primary region'
+        required: true
+
+jobs:
+  deploy-secondary:
+    runs-on: ubuntu-latest
+    environment: secondary-region
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Get Secondary AKS Context
+        uses: azure/aks-set-context@v3
+        with:
+          resource-group: ${{ vars.AKS_SECONDARY_RESOURCE_GROUP }}
+          cluster-name: ${{ vars.AKS_SECONDARY_CLUSTER_NAME }}
+
+      - name: Deploy to Secondary
+        run: |
+          kubectl create namespace secondary --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -f k8s/ -n secondary

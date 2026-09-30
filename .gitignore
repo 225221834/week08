@@ -203,6 +203,7 @@ node_modules/
 .terraform.lock.hcl.bak
 *.tfstate
 *.tfstate.*
+*.tfvars
 crash.log
 override.tf
 override.tf.json
@@ -210,3 +211,4 @@ override.tf.json
 *_override.tf.json
 .terraformrc
 terraform.rc
+*.tfvars.example

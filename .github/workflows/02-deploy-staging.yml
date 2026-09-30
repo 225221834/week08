@@ -1,179 +1,61 @@
-name: 02 - Deploy to Staging
+name: 02 - Deploy to Staging (Multi-Region)
 
 on:
   workflow_run:
-    workflows:
-      - "01 - CI"
-    types:
-      - completed
-    branches:
-      - main
+    workflows: ["01 - CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
   deploy-staging:
-    name: Deploy to Staging
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
-
-    if: >
-      ${{ github.event.workflow_run.conclusion == 'success' }}
-
-    environment:
-      name: staging
+    strategy:
+      matrix:
+        region: [primary, secondary]
+    environment: ${{ matrix.region }}-region
 
     steps:
-      - name: Checkout tested commit
+      - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
 
-      - name: Login to Azure
-        uses: azure/login@v3
+      - name: Azure Login
+        uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Get AKS credentials
-        run: |
-          az aks get-credentials \
-            --resource-group ${{ vars.AKS_RESOURCE_GROUP }} \
-            --name ${{ vars.AKS_CLUSTER_NAME }} \
-            --overwrite-existing
-
-      - name: Create staging namespace
-        run: |
-          kubectl create namespace staging \
-            --dry-run=client \
-            -o yaml | kubectl apply -f -
-
-      - name: Create PostgreSQL secret
-        run: |
-          kubectl create secret generic postgres-secret \
-            --namespace staging \
-            --from-literal=POSTGRES_USER="${{ secrets.POSTGRES_USER }}" \
-            --from-literal=POSTGRES_PASSWORD="${{ secrets.POSTGRES_PASSWORD }}" \
-            --dry-run=client \
-            -o yaml | kubectl apply -f -
-
-      - name: Create application secret
-        run: |
-          kubectl create secret generic application-secret \
-            --namespace staging \
-            --from-literal=POSTGRES_USER="${{ secrets.POSTGRES_USER }}" \
-            --from-literal=POSTGRES_PASSWORD="${{ secrets.POSTGRES_PASSWORD }}" \
-            --from-literal=JWT_SECRET_KEY="${{ secrets.JWT_SECRET_KEY }}" \
-            --from-literal=DEFAULT_ADMIN_USERNAME="${{ secrets.DEFAULT_ADMIN_USERNAME }}" \
-            --from-literal=DEFAULT_ADMIN_EMAIL="${{ secrets.DEFAULT_ADMIN_EMAIL }}" \
-            --from-literal=DEFAULT_ADMIN_PASSWORD="${{ secrets.DEFAULT_ADMIN_PASSWORD }}" \
-            --from-literal=AZURE_STORAGE_CONNECTION_STRING="${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}" \
-            --dry-run=client \
-            -o yaml | kubectl apply -f -
-
-      - name: Apply Kubernetes manifests
-        run: |
-          kubectl apply \
-            -f kubernetes/staging/
-
-      - name: Update frontend image
-        run: |
-          kubectl set image deployment/frontend \
-            frontend=${{ vars.ACR_LOGIN_SERVER }}/koalatech-frontend:${{ github.event.workflow_run.head_sha }} \
-            -n staging
-
-      - name: Update user-service image
-        run: |
-          kubectl set image deployment/user-service \
-            user-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-user-service:${{ github.event.workflow_run.head_sha }} \
-            -n staging
-
-      - name: Update student-service image
-        run: |
-          kubectl set image deployment/student-service \
-            student-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-student-service:${{ github.event.workflow_run.head_sha }} \
-            -n staging
-
-      - name: Update lecturer-service image
-        run: |
-          kubectl set image deployment/lecturer-service \
-            lecturer-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-lecturer-service:${{ github.event.workflow_run.head_sha }} \
-            -n staging
-
-      - name: Update course-service image
-        run: |
-          kubectl set image deployment/course-service \
-            course-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-course-service:${{ github.event.workflow_run.head_sha }} \
-            -n staging
-
-      - name: Update enrollment-service image
-        run: |
-          kubectl set image deployment/enrollment-service \
-            enrollment-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-enrollment-service:${{ github.event.workflow_run.head_sha }} \
-            -n staging
-
-      - name: Wait for frontend rollout
-        run: |
-          kubectl rollout status deployment/frontend \
-            -n staging \
-            --timeout=300s
-
-      - name: Wait for user-service rollout
-        run: |
-          kubectl rollout status deployment/user-service \
-            -n staging \
-            --timeout=300s
-
-      - name: Wait for student-service rollout
-        run: |
-          kubectl rollout status deployment/student-service \
-            -n staging \
-            --timeout=300s
-
-      - name: Wait for lecturer-service rollout
-        run: |
-          kubectl rollout status deployment/lecturer-service \
-            -n staging \
-            --timeout=300s
-
-      - name: Wait for course-service rollout
-        run: |
-          kubectl rollout status deployment/course-service \
-            -n staging \
-            --timeout=300s
-
-      - name: Wait for enrollment-service rollout
-        run: |
-          kubectl rollout status deployment/enrollment-service \
-            -n staging \
-            --timeout=300s
-
-      - name: Show staging resources
-        run: |
-          kubectl get pods -n staging
-          kubectl get services -n staging
-          kubectl get pvc -n staging
-  # =========================================================
-  # Monitoring: Prometheus + Grafana
-  # =========================================================       
-      - name: Install Helm
-        uses: azure/setup-helm@v4
+      - name: Set AKS Context (Primary Region)
+        if: matrix.region == 'primary'
+        uses: azure/aks-set-context@v3
         with:
-          version: 'v3.14.0'   # or latest stable
+          resource-group: ${{ vars.AKS_PRIMARY_RESOURCE_GROUP }}
+          cluster-name: ${{ vars.AKS_PRIMARY_CLUSTER_NAME }}
 
-      - name: Install / Upgrade Prometheus + Grafana
-        run: |
-          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-          helm repo update
-          helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
-            --namespace monitoring \
-            --create-namespace \
-            --set grafana.adminPassword=${{ secrets.GRAFANA_ADMIN_PASSWORD }} \
-            --wait \
-            --timeout 10m
+      - name: Set AKS Context (Secondary Region)
+        if: matrix.region == 'secondary'
+        uses: azure/aks-set-context@v3
+        with:
+          resource-group: ${{ vars.AKS_SECONDARY_RESOURCE_GROUP }}
+          cluster-name: ${{ vars.AKS_SECONDARY_CLUSTER_NAME }}
 
-      - name: Verify monitoring stack
+      - name: Create Staging Namespace
         run: |
-          kubectl get pods -n monitoring
-          kubectl get svc -n monitoring 
-      - name: Grafana port-forward
+          kubectl create namespace staging --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Create Kubernetes Secret from Environment
         run: |
-          kubectl port-forward svc/kube-prometheus-stack-grafana 3000:80 -n monitoring &
-          sleep 5
-          echo "Grafana is accessible at http://localhost:3000 (username: admin, password: ${{ secrets.GRAFANA_ADMIN_PASSWORD }})"
+          kubectl create secret generic app-secrets \
+            --namespace=staging \
+            --from-literal=POSTGRES_USER='${{ secrets.POSTGRES_USER }}' \
+            --from-literal=POSTGRES_PASSWORD='${{ secrets.POSTGRES_PASSWORD }}' \
+            --from-literal=JWT_SECRET_KEY='${{ secrets.JWT_SECRET_KEY }}' \
+            --from-literal=DEFAULT_ADMIN_USERNAME='${{ secrets.DEFAULT_ADMIN_USERNAME }}' \
+            --from-literal=DEFAULT_ADMIN_EMAIL='${{ secrets.DEFAULT_ADMIN_EMAIL }}' \
+            --from-literal=DEFAULT_ADMIN_PASSWORD='${{ secrets.DEFAULT_ADMIN_PASSWORD }}' \
+            --from-literal=AZURE_STORAGE_CONNECTION_STRING='${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}' \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy Staging Manifests
+        run: |
+          kubectl apply -f k8s/ -n staging
