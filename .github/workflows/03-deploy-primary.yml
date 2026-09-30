@@ -66,10 +66,19 @@ jobs:
 
       - name: Apply Kubernetes manifests
         run: |
-          # Use the real folder that exists in the repo
-          kubectl apply -f kubernetes/ -n primary
-          # If you have a region-specific subfolder, use e.g.:
-          # kubectl apply -f kubernetes/primary/ -n primary
+          # Skip 01-namespace.yaml (it hard-codes "staging")
+          kubectl apply -n primary \
+            -f kubernetes/staging/02-user-db.yaml \
+            -f kubernetes/staging/03-student-db.yaml \
+            -f kubernetes/staging/04-lecturer-db.yaml \
+            -f kubernetes/staging/05-course-db.yaml \
+            -f kubernetes/staging/06-enrollment-db.yaml \
+            -f kubernetes/staging/07-user-service.yaml \
+            -f kubernetes/staging/08-student-service.yaml \
+            -f kubernetes/staging/09-lecturer-service.yaml \
+            -f kubernetes/staging/10-course-service.yaml \
+            -f kubernetes/staging/11-enrollment-service.yaml \
+            -f kubernetes/staging/12-frontend.yaml
 
       - name: Update images
         run: |
