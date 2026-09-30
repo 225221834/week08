@@ -78,7 +78,7 @@ jobs:
       - name: Run tests
         working-directory: ${{ matrix.service }}
         run: pytest -v
-
+  # Build and push Docker images for each service
   build-and-push:
     name: Build and Push ${{ matrix.image }}
     runs-on: ubuntu-latest
@@ -120,7 +120,7 @@ jobs:
             --platform linux/amd64 \
             -t ${{ vars.ACR_LOGIN_SERVER }}/${{ matrix.image }}:${{ github.sha }} \
             ./${{ matrix.service }}
-
+      # Scan the built image for vulnerabilities
       - name: Docker Scout Scan
         uses: docker/scout-action@v1
         continue-on-error: true
