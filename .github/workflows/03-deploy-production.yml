@@ -1,20 +1,16 @@
-name: 02 - Deploy to Staging (Multi-Region)
+name: 03 - Deploy to Production (Multi-Region)
 
 on:
-  workflow_run:
-    workflows:
-      - "01 - CI"
-    types:
-      - completed
-    branches:
-      - main
   workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Git SHA that passed staging"
+        required: true
 
 jobs:
-  deploy-staging:
-    name: Deploy to Staging (${{ matrix.region }})
+  deploy-production:
+    name: Deploy to Production (${{ matrix.region }})
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     strategy:
       matrix:
         region: [primary, secondary]
@@ -22,18 +18,13 @@ jobs:
       name: ${{ matrix.region }}-region
 
     steps:
-      - name: Checkout tested commit
+      - name: Checkout Code
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
-      - name: Determine Image Tag
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_run" ]; then
-            echo "IMAGE_TAG=${{ github.event.workflow_run.head_sha }}" >> $GITHUB_ENV
-          else
-            echo "IMAGE_TAG=${{ github.sha }}" >> $GITHUB_ENV
-          fi
+      - name: Set Image Tag
+        env:
+          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+        run: echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
 
       - name: Login to Azure
         uses: azure/login@v2
@@ -56,15 +47,15 @@ jobs:
             --name ${{ vars.AKS_SECONDARY_CLUSTER_NAME }} \
             --overwrite-existing
 
-      - name: Create staging namespace
+      - name: Create production namespace
         run: |
-          kubectl create namespace staging \
+          kubectl create namespace production \
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Create PostgreSQL secret
         run: |
           kubectl create secret generic postgres-secret \
-            --namespace staging \
+            --namespace production \
             --from-literal=POSTGRES_USER='${{ secrets.POSTGRES_USER }}' \
             --from-literal=POSTGRES_PASSWORD='${{ secrets.POSTGRES_PASSWORD }}' \
             --dry-run=client -o yaml | kubectl apply -f -
@@ -72,7 +63,7 @@ jobs:
       - name: Create application secret
         run: |
           kubectl create secret generic application-secret \
-            --namespace staging \
+            --namespace production \
             --from-literal=POSTGRES_USER='${{ secrets.POSTGRES_USER }}' \
             --from-literal=POSTGRES_PASSWORD='${{ secrets.POSTGRES_PASSWORD }}' \
             --from-literal=JWT_SECRET_KEY='${{ secrets.JWT_SECRET_KEY }}' \
@@ -83,32 +74,32 @@ jobs:
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Apply Kubernetes manifests
-        run: kubectl apply -f kubernetes/staging/ -n staging
+        run: kubectl apply -f kubernetes/production/ -n production
 
       - name: Update images
         run: |
           kubectl set image deployment/frontend \
-            frontend=${{ vars.ACR_LOGIN_SERVER }}/koalatech-frontend:${{ env.IMAGE_TAG }} -n staging
+            frontend=${{ vars.ACR_LOGIN_SERVER }}/koalatech-frontend:${{ env.IMAGE_TAG }} -n production
           kubectl set image deployment/user-service \
-            user-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-user-service:${{ env.IMAGE_TAG }} -n staging
+            user-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-user-service:${{ env.IMAGE_TAG }} -n production
           kubectl set image deployment/student-service \
-            student-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-student-service:${{ env.IMAGE_TAG }} -n staging
+            student-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-student-service:${{ env.IMAGE_TAG }} -n production
           kubectl set image deployment/lecturer-service \
-            lecturer-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-lecturer-service:${{ env.IMAGE_TAG }} -n staging
+            lecturer-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-lecturer-service:${{ env.IMAGE_TAG }} -n production
           kubectl set image deployment/course-service \
-            course-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-course-service:${{ env.IMAGE_TAG }} -n staging
+            course-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-course-service:${{ env.IMAGE_TAG }} -n production
           kubectl set image deployment/enrollment-service \
-            enrollment-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-enrollment-service:${{ env.IMAGE_TAG }} -n staging
+            enrollment-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-enrollment-service:${{ env.IMAGE_TAG }} -n production
 
       - name: Wait for rollouts
         run: |
-          kubectl rollout status deployment/frontend -n staging --timeout=300s
-          kubectl rollout status deployment/user-service -n staging --timeout=300s
-          kubectl rollout status deployment/student-service -n staging --timeout=300s
-          kubectl rollout status deployment/lecturer-service -n staging --timeout=300s
-          kubectl rollout status deployment/course-service -n staging --timeout=300s
-          kubectl rollout status deployment/enrollment-service -n staging --timeout=300s
+          kubectl rollout status deployment/frontend -n production --timeout=300s
+          kubectl rollout status deployment/user-service -n production --timeout=300s
+          kubectl rollout status deployment/student-service -n production --timeout=300s
+          kubectl rollout status deployment/lecturer-service -n production --timeout=300s
+          kubectl rollout status deployment/course-service -n production --timeout=300s
+          kubectl rollout status deployment/enrollment-service -n production --timeout=300s
 
       - name: Show resources
         run: |
-          kubectl get pods,svc,pvc -n staging
+          kubectl get pods,svc,pvc -n production
