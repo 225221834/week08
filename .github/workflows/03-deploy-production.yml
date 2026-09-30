@@ -1,16 +1,28 @@
 name: 03 - Deploy to Production (Multi-Region)
 
 on:
+  # Automatic: run after Staging finishes successfully
+  workflow_run:
+    workflows:
+      - "02 - Deploy to Staging (Multi-Region)"
+    types:
+      - completed
+    branches:
+      - main
+
+  # Manual override still available
   workflow_dispatch:
     inputs:
       image_tag:
-        description: "Git SHA that passed staging"
-        required: true
+        description: "Git SHA to deploy (leave empty to use the SHA from the triggering Staging run)"
+        required: false
 
 jobs:
   deploy-production:
     name: Deploy to Production (${{ matrix.region }})
     runs-on: ubuntu-latest
+    # Only proceed when Staging succeeded (or when manually triggered)
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     strategy:
       matrix:
         region: [primary, secondary]
@@ -20,11 +32,24 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          # Use the commit that Staging tested
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
-      - name: Set Image Tag
+      - name: Determine Image Tag
         env:
-          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
-        run: echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
+          EVENT_NAME: ${{ github.event_name }}
+          IMAGE_TAG_INPUT: ${{ github.event.inputs.image_tag }}
+          WORKFLOW_RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          GITHUB_SHA_VALUE: ${{ github.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$IMAGE_TAG_INPUT" ]; then
+            echo "IMAGE_TAG=$IMAGE_TAG_INPUT" >> "$GITHUB_ENV"
+          elif [ "$EVENT_NAME" = "workflow_run" ]; then
+            echo "IMAGE_TAG=$WORKFLOW_RUN_HEAD_SHA" >> "$GITHUB_ENV"
+          else
+            echo "IMAGE_TAG=$GITHUB_SHA_VALUE" >> "$GITHUB_ENV"
+          fi
 
       - name: Login to Azure
         uses: azure/login@v2
