@@ -8,8 +8,6 @@ on:
   
   # Manual trigger for the workflow
   workflow_dispatch:
-
-
 jobs:
 
   # =========================================================
@@ -18,7 +16,7 @@ jobs:
   backend-test:
     name: Test ${{ matrix.service }}
     runs-on: ubuntu-latest
-
+    # Run backend tests when code is pushed to main or manually triggered
     strategy:
       fail-fast: false
 
