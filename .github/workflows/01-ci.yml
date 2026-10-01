@@ -163,7 +163,8 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
+          
+      # Run Docker Scout Scan
       - name: Run Docker Scout Scan
         uses: docker/scout-action@v1
         with:
