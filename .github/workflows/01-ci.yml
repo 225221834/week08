@@ -150,14 +150,21 @@ jobs:
       - name: Login to Azure Container Registry
         run: |
           az acr login --name ${{ vars.ACR_NAME }}
-
+      # Build and push Docker image for each service
       - name: Build Docker image
         run: |
           docker build \
             --platform linux/amd64 \
             -t ${{ vars.ACR_LOGIN_SERVER }}/${{ matrix.image }}:${{ github.sha }} \
             ./${{ matrix.service }}
-
+      # Setup Docker Scout 
+      - name: Setup Docker Scout
+        uses: docker/scout-action@v1
+        with:
+          command: quickview,cves
+          only-severities: critical,high
+          exit-code: true # Fails the pipeline if Critical/High CVEs are discovered
+      # Push Docker image for each service
       - name: Push Docker image with commit SHA
         run: |
           docker push \
