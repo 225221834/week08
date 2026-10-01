@@ -41,7 +41,7 @@ jobs:
           - service: enrollment-service
             database: enrollments
             port: 5437
-
+    # Run backend tests when code is pushed to main or manually triggered
     services:
       postgres:
         image: postgres:16
