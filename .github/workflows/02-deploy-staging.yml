@@ -1,4 +1,4 @@
-name: 02 - Deploy to Staging
+name: 02 - Deploy to Staging (Multi-Region)
 
 on:
   workflow_run:
@@ -8,144 +8,127 @@ on:
       - completed
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   deploy-staging:
-    name: Deploy to Staging
+    name: Deploy to Staging (${{ matrix.region }})
     runs-on: ubuntu-latest
-
-    if: >
-      ${{ github.event.workflow_run.conclusion == 'success' }}
-
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    strategy:
+      matrix:
+        region: [primary, secondary]
+      fail-fast: false
     environment:
-      name: staging
+      name: ${{ matrix.region }}-region
 
     steps:
       - name: Checkout tested commit
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Determine Image Tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            echo "IMAGE_TAG=${{ github.event.workflow_run.head_sha }}" >> $GITHUB_ENV
+          else
+            echo "IMAGE_TAG=${{ github.sha }}" >> $GITHUB_ENV
+          fi
+          echo "Using IMAGE_TAG=$IMAGE_TAG"
 
       - name: Login to Azure
-        uses: azure/login@v3
+        uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Get AKS credentials
+      - name: DEBUG - Show variables
+        run: |
+          echo "=== Repository Variables ==="
+          echo "AKS_PRIMARY_RESOURCE_GROUP   = '${{ vars.AKS_PRIMARY_RESOURCE_GROUP }}'"
+          echo "AKS_PRIMARY_CLUSTER_NAME     = '${{ vars.AKS_PRIMARY_CLUSTER_NAME }}'"
+          echo "AKS_SECONDARY_RESOURCE_GROUP = '${{ vars.AKS_SECONDARY_RESOURCE_GROUP }}'"
+          echo "AKS_SECONDARY_CLUSTER_NAME   = '${{ vars.AKS_SECONDARY_CLUSTER_NAME }}'"
+          echo "ACR_LOGIN_SERVER             = '${{ vars.ACR_LOGIN_SERVER }}'"
+          echo "ACR_NAME                     = '${{ vars.ACR_NAME }}'"
+          echo "============================"
+
+      # -------------------------------------------------
+      # Hard-coded values (temporary) – replace later with vars.* once debug confirms they work
+      # -------------------------------------------------
+      - name: Get Primary AKS credentials
+        if: matrix.region == 'primary'
         run: |
           az aks get-credentials \
-            --resource-group ${{ vars.AKS_RESOURCE_GROUP }} \
-            --name ${{ vars.AKS_CLUSTER_NAME }} \
+            --resource-group rg-koalatech-aue \
+            --name aks-koalatech-aue \
+            --overwrite-existing
+
+      - name: Get Secondary AKS credentials
+        if: matrix.region == 'secondary'
+        run: |
+          az aks get-credentials \
+            --resource-group rg-koalatech-ause \
+            --name aks-koalatech-ause \
             --overwrite-existing
 
       - name: Create staging namespace
         run: |
           kubectl create namespace staging \
-            --dry-run=client \
-            -o yaml | kubectl apply -f -
+            --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Create PostgreSQL secret
         run: |
           kubectl create secret generic postgres-secret \
             --namespace staging \
-            --from-literal=POSTGRES_USER="${{ secrets.POSTGRES_USER }}" \
-            --from-literal=POSTGRES_PASSWORD="${{ secrets.POSTGRES_PASSWORD }}" \
-            --dry-run=client \
-            -o yaml | kubectl apply -f -
+            --from-literal=POSTGRES_USER='${{ secrets.POSTGRES_USER }}' \
+            --from-literal=POSTGRES_PASSWORD='${{ secrets.POSTGRES_PASSWORD }}' \
+            --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Create application secret
         run: |
           kubectl create secret generic application-secret \
             --namespace staging \
-            --from-literal=POSTGRES_USER="${{ secrets.POSTGRES_USER }}" \
-            --from-literal=POSTGRES_PASSWORD="${{ secrets.POSTGRES_PASSWORD }}" \
-            --from-literal=JWT_SECRET_KEY="${{ secrets.JWT_SECRET_KEY }}" \
-            --from-literal=DEFAULT_ADMIN_USERNAME="${{ secrets.DEFAULT_ADMIN_USERNAME }}" \
-            --from-literal=DEFAULT_ADMIN_EMAIL="${{ secrets.DEFAULT_ADMIN_EMAIL }}" \
-            --from-literal=DEFAULT_ADMIN_PASSWORD="${{ secrets.DEFAULT_ADMIN_PASSWORD }}" \
-            --from-literal=AZURE_STORAGE_CONNECTION_STRING="${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}" \
-            --dry-run=client \
-            -o yaml | kubectl apply -f -
+            --from-literal=POSTGRES_USER='${{ secrets.POSTGRES_USER }}' \
+            --from-literal=POSTGRES_PASSWORD='${{ secrets.POSTGRES_PASSWORD }}' \
+            --from-literal=JWT_SECRET_KEY='${{ secrets.JWT_SECRET_KEY }}' \
+            --from-literal=DEFAULT_ADMIN_USERNAME='${{ secrets.DEFAULT_ADMIN_USERNAME }}' \
+            --from-literal=DEFAULT_ADMIN_EMAIL='${{ secrets.DEFAULT_ADMIN_EMAIL }}' \
+            --from-literal=DEFAULT_ADMIN_PASSWORD='${{ secrets.DEFAULT_ADMIN_PASSWORD }}' \
+            --from-literal=AZURE_STORAGE_CONNECTION_STRING='${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}' \
+            --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Apply Kubernetes manifests
-        run: |
-          kubectl apply \
-            -f kubernetes/staging/
+        run: kubectl apply -f kubernetes/staging/ -n staging
 
-      - name: Update frontend image
+      - name: Update images
         run: |
+          # Hard-coded ACR for reliability (change back to ${{ vars.ACR_LOGIN_SERVER }} later)
+          ACR=koalatechweek08acr26.azurecr.io
+          TAG=${{ env.IMAGE_TAG }}
+
           kubectl set image deployment/frontend \
-            frontend=${{ vars.ACR_LOGIN_SERVER }}/koalatech-frontend:${{ github.event.workflow_run.head_sha }} \
-            -n staging
-
-      - name: Update user-service image
-        run: |
+            frontend=$ACR/koalatech-frontend:$TAG -n staging
           kubectl set image deployment/user-service \
-            user-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-user-service:${{ github.event.workflow_run.head_sha }} \
-            -n staging
-
-      - name: Update student-service image
-        run: |
+            user-service=$ACR/koalatech-user-service:$TAG -n staging
           kubectl set image deployment/student-service \
-            student-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-student-service:${{ github.event.workflow_run.head_sha }} \
-            -n staging
-
-      - name: Update lecturer-service image
-        run: |
+            student-service=$ACR/koalatech-student-service:$TAG -n staging
           kubectl set image deployment/lecturer-service \
-            lecturer-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-lecturer-service:${{ github.event.workflow_run.head_sha }} \
-            -n staging
-
-      - name: Update course-service image
-        run: |
+            lecturer-service=$ACR/koalatech-lecturer-service:$TAG -n staging
           kubectl set image deployment/course-service \
-            course-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-course-service:${{ github.event.workflow_run.head_sha }} \
-            -n staging
-
-      - name: Update enrollment-service image
-        run: |
+            course-service=$ACR/koalatech-course-service:$TAG -n staging
           kubectl set image deployment/enrollment-service \
-            enrollment-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-enrollment-service:${{ github.event.workflow_run.head_sha }} \
-            -n staging
+            enrollment-service=$ACR/koalatech-enrollment-service:$TAG -n staging
 
-      - name: Wait for frontend rollout
+      - name: Wait for rollouts
         run: |
-          kubectl rollout status deployment/frontend \
-            -n staging \
-            --timeout=300s
+          kubectl rollout status deployment/frontend -n staging --timeout=300s
+          kubectl rollout status deployment/user-service -n staging --timeout=300s
+          kubectl rollout status deployment/student-service -n staging --timeout=300s
+          kubectl rollout status deployment/lecturer-service -n staging --timeout=300s
+          kubectl rollout status deployment/course-service -n staging --timeout=300s
+          kubectl rollout status deployment/enrollment-service -n staging --timeout=300s
 
-      - name: Wait for user-service rollout
+      - name: Show resources
         run: |
-          kubectl rollout status deployment/user-service \
-            -n staging \
-            --timeout=300s
-
-      - name: Wait for student-service rollout
-        run: |
-          kubectl rollout status deployment/student-service \
-            -n staging \
-            --timeout=300s
-
-      - name: Wait for lecturer-service rollout
-        run: |
-          kubectl rollout status deployment/lecturer-service \
-            -n staging \
-            --timeout=300s
-
-      - name: Wait for course-service rollout
-        run: |
-          kubectl rollout status deployment/course-service \
-            -n staging \
-            --timeout=300s
-
-      - name: Wait for enrollment-service rollout
-        run: |
-          kubectl rollout status deployment/enrollment-service \
-            -n staging \
-            --timeout=300s
-
-      - name: Show staging resources
-        run: |
-          kubectl get pods -n staging
-          kubectl get services -n staging
-          kubectl get pvc -n staging
+          kubectl get pods,svc,pvc -n staging
