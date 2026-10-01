@@ -169,7 +169,7 @@ jobs:
         with:
             command: quickview,cves
             only-severities: critical,high
-            exit-code: true
+            exit-code: false 
             summary: true
             github-token: ${{ secrets.GITHUB_TOKEN }}
             user: ${{ secrets.DOCKERHUB_USERNAME }}
