@@ -62,7 +62,7 @@ jobs:
       - name: Create production namespace
         run: |
           kubectl create namespace production --dry-run=client -o yaml | kubectl apply -f -
-
+      # Create Kubernetes secrets 
       - name: Create secrets
         run: |
           kubectl create secret generic postgres-secret \
