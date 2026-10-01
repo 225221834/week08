@@ -1,0 +1,106 @@
+name: 03 - Deploy to Production (Multi-Region)
+
+on:
+  workflow_run:
+    workflows: ["02 - Deploy to Staging (Multi-Region)"]
+    types: [completed]
+    branches: [main]
+
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Git SHA of the images to deploy (must have passed staging)"
+        required: true
+        type: string
+
+jobs:
+  deploy-production:
+    name: Deploy to Production (${{ matrix.region }})
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    strategy:
+      matrix:
+        region: [primary, secondary]
+      fail-fast: false
+    environment:
+      name: ${{ matrix.region }}-region          # requires approval if you configure it
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Determine Image Tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "IMAGE_TAG=${{ github.event.inputs.image_tag }}" >> $GITHUB_ENV
+          else
+            echo "IMAGE_TAG=${{ github.event.workflow_run.head_sha }}" >> $GITHUB_ENV
+          fi
+          echo "Deploying image tag: $IMAGE_TAG"
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Get AKS credentials
+        run: |
+          if [ "${{ matrix.region }}" = "primary" ]; then
+            az aks get-credentials \
+              --resource-group ${{ vars.AKS_PRIMARY_RESOURCE_GROUP }} \
+              --name ${{ vars.AKS_PRIMARY_CLUSTER_NAME }} \
+              --overwrite-existing
+          else
+            az aks get-credentials \
+              --resource-group ${{ vars.AKS_SECONDARY_RESOURCE_GROUP }} \
+              --name ${{ vars.AKS_SECONDARY_CLUSTER_NAME }} \
+              --overwrite-existing
+          fi
+
+      - name: Create production namespace
+        run: |
+          kubectl create namespace production --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Create secrets
+        run: |
+          kubectl create secret generic postgres-secret \
+            --namespace production \
+            --from-literal=POSTGRES_USER='${{ secrets.POSTGRES_USER }}' \
+            --from-literal=POSTGRES_PASSWORD='${{ secrets.POSTGRES_PASSWORD }}' \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          kubectl create secret generic application-secret \
+            --namespace production \
+            --from-literal=POSTGRES_USER='${{ secrets.POSTGRES_USER }}' \
+            --from-literal=POSTGRES_PASSWORD='${{ secrets.POSTGRES_PASSWORD }}' \
+            --from-literal=JWT_SECRET_KEY='${{ secrets.JWT_SECRET_KEY }}' \
+            --from-literal=DEFAULT_ADMIN_USERNAME='${{ secrets.DEFAULT_ADMIN_USERNAME }}' \
+            --from-literal=DEFAULT_ADMIN_EMAIL='${{ secrets.DEFAULT_ADMIN_EMAIL }}' \
+            --from-literal=DEFAULT_ADMIN_PASSWORD='${{ secrets.DEFAULT_ADMIN_PASSWORD }}' \
+            --from-literal=AZURE_STORAGE_CONNECTION_STRING='${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}' \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply Kubernetes manifests
+        run: kubectl apply -f kubernetes/production/ -n production
+
+      - name: Update images to the tested SHA
+        run: |
+          IMAGE=${{ vars.ACR_LOGIN_SERVER }}
+          TAG=${{ env.IMAGE_TAG }}
+          kubectl set image deployment/frontend frontend=$IMAGE/koalatech-frontend:$TAG -n production
+          kubectl set image deployment/user-service user-service=$IMAGE/koalatech-user-service:$TAG -n production
+          kubectl set image deployment/student-service student-service=$IMAGE/koalatech-student-service:$TAG -n production
+          kubectl set image deployment/lecturer-service lecturer-service=$IMAGE/koalatech-lecturer-service:$TAG -n production
+          kubectl set image deployment/course-service course-service=$IMAGE/koalatech-course-service:$TAG -n production
+          kubectl set image deployment/enrollment-service enrollment-service=$IMAGE/koalatech-enrollment-service:$TAG -n production
+
+      - name: Wait for rollouts
+        run: |
+          for dep in frontend user-service student-service lecturer-service course-service enrollment-service; do
+            kubectl rollout status deployment/$dep -n production --timeout=300s
+          done
+
+      - name: Show final status
+        run: kubectl get pods,svc,pvc -n production
