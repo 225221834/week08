@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: user-db-pvc
+  namespace: staging
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: managed-csi-lrs
+  resources:
+    requests:
+      storage: 1Gi
